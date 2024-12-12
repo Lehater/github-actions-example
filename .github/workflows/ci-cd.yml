@@ -1,4 +1,4 @@
-name: CI/CD Pipeline with Docker
+name: CI/CD Pipeline
 
 on:
   push:
@@ -10,22 +10,36 @@ on:
 
 jobs:
   build-and-test:
-    name: Build and Test
-    runs-on: ubuntu-latest
+    name: Build and Test on Multiple OS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            java-version: 17
+          - os: windows-latest
+            java-version: 17
+          - os: macos-latest
+            java-version: 17
 
     steps:
+      # Клонируем репозиторий
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # Настраиваем JDK
       - name: Set up JDK
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: ${{ matrix.java-version }}
 
+      # Собираем проект
       - name: Build with Maven
         run: mvn clean package
 
+      # Запускаем тесты
       - name: Run Tests
         run: mvn test
 
@@ -35,32 +49,49 @@ jobs:
     needs: build-and-test
 
     steps:
+      # Клонируем репозиторий
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # Авторизация в Docker Hub с использованием токена
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          password: ${{ secrets.DOCKER_TOKEN }}
 
+      # Создаем Docker-образ
       - name: Build Docker Image
         run: docker build -t ${{ secrets.DOCKER_USERNAME }}/java-app:latest .
 
+      # Загружаем образ в Docker Hub
       - name: Push Docker Image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/java-app:latest
 
   deploy:
-    name: Deploy to Server
+    name: Deploy to Local Server
     needs: docker-build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: SSH Deploy
+      # Настраиваем SSH для подключения к локальному серверу
+      - name: Configure SSH
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+
+      # Выполняем деплой на сервер
+      - name: Deploy to Local Server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@localhost << 'EOF'
           docker pull ${{ secrets.DOCKER_USERNAME }}/java-app:latest
           docker stop java-app || true
           docker rm java-app || true
           docker run -d --name java-app -p 8080:8080 ${{ secrets.DOCKER_USERNAME }}/java-app:latest
           EOF
+
+      # Проверяем успешность деплоя
+      - name: Verify Deployment
+        run: curl http://localhost:8080
