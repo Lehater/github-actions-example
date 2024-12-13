@@ -47,6 +47,7 @@ jobs:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
     needs: build-and-test
+    environment: env-actions-example
 
     steps:
       # Клонируем репозиторий
@@ -68,30 +69,3 @@ jobs:
       - name: Push Docker Image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/java-app:latest
 
-  deploy:
-    name: Deploy to Local Server
-    needs: docker-build-and-push
-    runs-on: ubuntu-latest
-
-    steps:
-      # Настраиваем SSH для подключения к локальному серверу
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
-
-      # Выполняем деплой на сервер
-      - name: Deploy to Local Server
-        run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@localhost << 'EOF'
-          docker pull ${{ secrets.DOCKER_USERNAME }}/java-app:latest
-          docker stop java-app || true
-          docker rm java-app || true
-          docker run -d --name java-app -p 8080:8080 ${{ secrets.DOCKER_USERNAME }}/java-app:latest
-          EOF
-
-      # Проверяем успешность деплоя
-      - name: Verify Deployment
-        run: curl http://localhost:8080
